@@ -2,13 +2,32 @@
 
 namespace OneShop;
 
-use pocketmine\Player;
+use pocketmine\plugin\PluginBase;
+use pocketmine\event\Listener;
+use pocketmine\event\TranslationContainer as Translation;
+use pocketmine\event\block\BlockBreakEvent;
+use pocketmine\event\block\BlockPlaceEvent;
+use pocketmine\event\player\PlayerInteractEvent;
+use pocketmine\event\server\ServerCommandEvent;
+use pocketmine\event\server\RemoteServerCommandEvent;
+use pocketmine\event\player\PlayerCommandPreprocessEvent;
+use pocketmine\network\protocol\AddItemEntityPacket;
+use pocketmine\network\protocol\AddEntityPacket;
+use pocketmine\network\protocol\RemoveEntityPacket;
+use pocketmine\network\protocol\SetEntityLinkPacket;
+use pocketmine\network\protocol\SetEntityDataPacket;
+use pocketmine\command\CommandSender;
+use pocketmine\command\Command;
+use pocketmine\level\sound\ClickSound;
+use pocketmine\utils\TextFormat as Color;
 use pocketmine\entity\Entity;
 use pocketmine\item\Item;
-use pocketmine\utils\TextFormat as Color;
-use pocketmine\event\TranslationContainer as Translation;
+use pocketmine\block\Block;
+use pocketmine\math\Vector3;
+use pocketmine\Player;
+use OneShop\task\SpawnShopTask;
 
-class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event\Listener{
+class OneShop extends PluginBase implements Listener{
 	const TOUCH_MODE = 0;
 	const TOUCH_POS = 1;
 	const INFO_TIME = 2;
@@ -34,18 +53,18 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 	const REGEX_ID = "/([\?]|[a-zA-Z_]+|[0-9]+)[\:]([\?]|[0-9]+)|([\?]|[a-zA-Z_]+|[0-9]+)/";
 	const REGEX_AMOUNT = "/([\?])|([1-9][0-9]*)[\~|\-|\:]([0-9][0-9]*)|([0-9]+)|([\-])/";
 
- 	protected $data = [], $spawned = [], $eids = [], $editTouch = [], $shopTouch = [], $placed = [], $packets = [];
-	protected $addItemEntityPk, $addEntityPk, $removeEntityPk, $setEntityLinkPk, $setEntityDataPk;
+ 	private $data = [], $spawned = [], $eids = [], $editTouch = [], $shopTouch = [], $placed = [], $packets = [];
+	private $addItemEntityPk, $addEntityPk, $removeEntityPk, $setEntityLinkPk, $setEntityDataPk;
 
 	public function onLoad(){
-		$this->addItemEntityPk = new \pocketmine\network\protocol\AddItemEntityPacket();
+		$this->addItemEntityPk = new AddItemEntityPacket();
 		$this->addItemEntityPk->x = 0;
 		$this->addItemEntityPk->y = 0;
 		$this->addItemEntityPk->z = 0;
 		$this->addItemEntityPk->speedX = 0;
 		$this->addItemEntityPk->speedY = 0;
 		$this->addItemEntityPk->speedZ = 0;
-		$this->addEntityPk = new \pocketmine\network\protocol\AddEntityPacket();
+		$this->addEntityPk = new AddEntityPacket();
 		$this->addEntityPk->type = 69;
 		$this->addEntityPk->speedX = 0;
 		$this->addEntityPk->speedY = 0;
@@ -53,15 +72,13 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 		$this->addEntityPk->yaw = 0;
 		$this->addEntityPk->pitch = 0;
 		$this->addEntityPk->metadata = [
-			Entity::DATA_FLAGS => [Entity::DATA_TYPE_BYTE, true << Entity::DATA_FLAG_SNEAKING],
-			Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, false],
- 			Entity::DATA_SILENT => [Entity::DATA_TYPE_BYTE, true],
+			Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, false], 			Entity::DATA_SILENT => [Entity::DATA_TYPE_BYTE, true],
 			Entity::DATA_NO_AI => [Entity::DATA_TYPE_BYTE, true]
 		];
-		$this->removeEntityPk = new \pocketmine\network\protocol\RemoveEntityPacket();
-		$this->setEntityLinkPk = new \pocketmine\network\protocol\SetEntityLinkPacket();
+		$this->removeEntityPk = new RemoveEntityPacket();
+		$this->setEntityLinkPk = new SetEntityLinkPacket();
 		$this->setEntityLinkPk->type = 1;
-		$this->setEntityDataPk = new \pocketmine\network\protocol\SetEntityDataPacket();
+		$this->setEntityDataPk = new SetEntityDataPacket();
  	}
 
 	public function onEnable(){
@@ -74,7 +91,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 			$this->getLogger()->info(Color::GREEN . "[OneShop] " . ($this->isKorean() ? "경제 플러그인을 찾았습니다. : " : "Finded economy plugin : ") . $this->money->getName());
 			$this->loadData();
 			$pluginManager->registerEvents($this, $this);
-			$this->getServer()->getScheduler()->scheduleRepeatingTask(new Task($this, [$this, "onTick"]), 5);
+			$this->getServer()->getScheduler()->scheduleRepeatingTask(new SpawnShopTask($this), 5);
 		}
 	}
 
@@ -82,7 +99,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 		$this->saveData();
 	}
 
-	public function onCommand(\pocketmine\command\CommandSender $sender, \pocketmine\command\Command $cmd, $label, array $sub){
+	public function onCommand(CommandSender $sender, Command $cmd, $label, array $sub){
 		$ik = $this->isKorean();
 		if(!isset($sub[0]) || $sub[0] == ""){
 			if(isset($this->editTouch[$name = $sender->getName()])){
@@ -279,13 +296,13 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 		return true;
 	}
 
-	public function onBlockBreak(\pocketmine\event\block\BlockBreakEvent $event){
+	public function onBlockBreak(BlockBreakEvent $event){
 		if((!isset($this->editTouch[$name = $event->getPlayer()->getName()]) || $this->editTouch[$name][self::TOUCH_MODE] !== self::MODE_BUILD) && isset($this->data[$this->pos2str($event->getBlock())])){
 			$event->setCancelled();
  		}
 	}
 
-	public function onBlockPlace(\pocketmine\event\block\BlockPlaceEvent $event){
+	public function onBlockPlace(BlockPlaceEvent $event){
 		if((!isset($this->editTouch[$name = $event->getPlayer()->getName()]) || $this->editTouch[$name][self::TOUCH_MODE] !== self::MODE_BUILD) && isset($this->data[$this->pos2str($event->getBlock())]) || isset($this->placed[$name])){
 			$event->setCancelled();
 			if(isset($this->placed[$name])){
@@ -294,7 +311,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
  		}
 	}
 
-	public function onPlayerInteract(\pocketmine\event\player\PlayerInteractEvent $event){
+	public function onPlayerInteract(PlayerInteractEvent $event){
 		$player = $event->getPlayer();
  		if((!isset($this->editTouch[$name = $player->getName()]) || $this->editTouch[$name][self::TOUCH_MODE] !== self::MODE_BUILD) && $event->getAction() == 1){ //$event->getAction() == PlayerInteractEvent::RIGHT_CLICK_BLOCK (== 1)
 			$block = $event->getBlock();
@@ -331,7 +348,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 							$player->sendMessage(Color::RED . "[OneShop] " . ($ik ? "이곳에는 상점이 없습니다." : "Shop is not exist in here"));
 						}else{
 							$this->removeShop($pos);
-							$player->sendMessage(Color::YELLOW . "[OneShop] " . ($ik ? "상점이 제거되었습니다.\n" . Color::YELLOW . "[OneShop] 다음 상점을 터치하시거나 명령어를 다시 입력해 제거모드를 종료해주세요." : "Shop is deleted \n" . Color::YELLOW . "[OneShop] Touch the next shop to delete or re-enter the command to disable the delete mode"));
+							$player->sendMessage(Color::YELLOW . "[OneShop] " . ($ik ? "상점이 제거되었습니다.\n" . Color::YELLOW . "[OneShop] 다음 상점을 터치하시거나 명령어를 다시 입력해 제거모드를 종료해주세요." : "Shop is deleted\n" . Color::YELLOW . "[OneShop] Touch the next shop to delete or re-enter the command to disable the delete mode"));
 						}
 					break;
 				}
@@ -345,7 +362,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 				if($this->data[$pos][self::BUY_AMOUNT] == "-" && $this->data[$pos][self::SELL_AMOUNT] == "-"){
 					return;
 				}else{
-					$player->getLevel()->addSound(new \pocketmine\level\sound\ClickSound($player->add(0, 10, 0)), [$player]);
+					$player->getLevel()->addSound(new ClickSound($player->add(0, 10, 0)), [$player]);
 					if($player->isCreative()){
 						$player->sendMessage(Color::RED . "[OneShop] " . ($ik ? 
 							"당신은 크리에이티브모드입니다.\n" . Color::DARK_RED . "  [OneShop][$pos] 아이디: " . $this->data[$pos][self::ITEM_ID] . ", 구매갯수: "  . (is_numeric($this->data[$pos][self::BUY_AMOUNT]) ? $this->data[$pos][self::BUY_AMOUNT] . ", " : ($this->data[$pos][self::BUY_AMOUNT] == "?" ? "모두, " : $this->data[$pos][self::BUY_AMOUNT]) . ", 개당") . " 가격: " . $this->data[$pos][self::BUY_PRICE] . "$, 판매갯수: "  . (is_numeric($this->data[$pos][self::SELL_AMOUNT]) ? $this->data[$pos][self::SELL_AMOUNT] . ", " : ($this->data[$pos][self::SELL_AMOUNT] == "?" ? "모두, " : $this->data[$pos][self::SELL_AMOUNT]) . ", 개당") . " 가격: " . $this->data[$pos][self::SELL_PRICE] . "$" : 
@@ -475,7 +492,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 	/**
 	 * @priority HIGHEST
 	 */
-	public function onServerCommandProcess(\pocketmine\event\server\ServerCommandEvent $event){
+	public function onServerCommandProcess(ServerCommandEvent $event){
 		if(!$event->isCancelled() && stripos("save-all", $command = $event->getCommand()) === 0){
 			$this->checkSaveAll($event->getSender());
 		}
@@ -484,7 +501,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 	/**
 	 * @priority HIGHEST
 	 */
-	public function onRemoteServerCommand(\pocketmine\event\server\RemoteServerCommandEvent $event){
+	public function onRemoteServerCommand(RemoteServerCommandEvent $event){
 		if(!$event->isCancelled() && stripos("save-all", $command = $event->getCommand()) === 0){
 			$this->checkSaveAll($event->getSender());
 		}
@@ -493,26 +510,21 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 	/**
 	 * @priority HIGHEST
 	 */
-	public function onPlayerCommandPreprocess(\pocketmine\event\player\PlayerCommandPreprocessEvent $event){
+	public function onPlayerCommandPreprocess(PlayerCommandPreprocessEvent $event){
 		if(!$event->isCancelled() && stripos("/save-all", $command = $event->getMessage()) === 0){
 			$this->checkSaveAll($event->getPlayer());
 		}
 	}
 
-	public function checkSaveAll(\pocketmine\command\CommandSender $sender){
-		if(($command =  $this->getServer()->getCommandMap()->getCommand("save-all")) instanceof \pocketmine\command\Command && $command->testPermissionSilent($sender)){
+	public function checkSaveAll(CommandSender $sender){
+		if(($command =  $this->getServer()->getCommandMap()->getCommand("save-all")) instanceof Command && $command->testPermissionSilent($sender)){
 			$this->saveData();
 			$sender->sendMessage(Color::YELLOW . "[OneShop] Saved data.");
 		}
 	}
 
- 	public function onTick(){
- 		foreach($this->shopTouch as $playerName => $touchInfo){
- 			if(microtime(true) - $touchInfo[self::INFO_TIME] > 5){
- 				unset($this->shopTouch[$playerName]);
- 			}
- 		}
-		foreach($this->data as $posKey => $shopInfo){
+ 	public function onAsyncRun(){
+ 		foreach($this->data as $posKey => $shopInfo){
 			if(!isset($this->spawned[$posKey])){
 				$this->spawned[$posKey] = [];
 			}
@@ -524,37 +536,54 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 				$this->packets[$posKey] = [];
 			}
 			$pos = explode(":", $posKey);
-			foreach($this->getServer()->getOnlinePlayers() as $player){
-				if($player->spawned && strtolower($pos[3]) == strtolower($player->getLevel()->getFolderName()) && ($distance = sqrt(pow($dX = ($x = $pos[0]) - $player->x, 2) + pow(($y = $pos[1]) - $player->y, 2) + pow($dZ = ($z = $pos[2]) - $player->z, 2))) < 200){
-					if(!isset($this->spawned[$posKey][$name = $player->getName()])){
-	 					if(!isset($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY])){
-		 					$this->addItemEntityPk->eid = $this->eids[$posKey];
-							$this->addItemEntityPk->item = new item(...explode(":", $shopInfo[self::ITEM_ID]));
-							$this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY] = clone $this->addItemEntityPk;
+			if(($level = $this->getServer()->getLevelByName($pos[3])) !== null){
+				foreach($level->getPlayers() as $player){
+					if($player->spawned && ($distance = sqrt(pow($dX = ($x = $pos[0]) - $player->x, 2) + pow(($y = $pos[1]) - $player->y, 2) + pow($dZ = ($z = $pos[2]) - $player->z, 2))) < 200){
+						if(!isset($this->spawned[$posKey][$name = $player->getName()])){
+		 					if(!isset($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY])){
+			 					$this->addItemEntityPk->eid = $this->eids[$posKey];
+								$this->addItemEntityPk->item = new item(...explode(":", $shopInfo[self::ITEM_ID]));
+								$this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY] = clone $this->addItemEntityPk;
+							}
+							if(!isset($this->packets[$posKey][self::PACKET_ADD_ENTITY])){
+								$this->addEntityPk->eid = $this->eids[$posKey] + 1;
+								$this->addEntityPk->x = $pos[0] + 0.5;
+								$this->addEntityPk->y = $pos[1];
+								$this->addEntityPk->z = $pos[2] + 0.5;
+								$this->addEntityPk->metadata[Entity::DATA_NAMETAG] = [
+									Entity::DATA_TYPE_STRING, Color::GREEN . ($this->isKorean() ?
+										$shopInfo[self::ITEM_ID] . "\n" . Color::AQUA . ($shopInfo[self::BUY_AMOUNT] == "-" ? "" : (is_numeric($shopInfo[self::BUY_AMOUNT]) ? $shopInfo[self::BUY_AMOUNT] . " => " : ($shopInfo[self::BUY_AMOUNT] == "?" ? "" : $shopInfo[self::BUY_AMOUNT] . " => ") . "개당") . " " . $shopInfo[self::BUY_PRICE] . "$") . ($shopInfo[self::SELL_AMOUNT] == "-" ? "" : "\n" . Color::DARK_AQUA . (is_numeric($shopInfo[self::SELL_AMOUNT]) ? $shopInfo[self::SELL_AMOUNT] . " => " : ($shopInfo[self::SELL_AMOUNT] == "?" ? "" : $shopInfo[self::SELL_AMOUNT] . " => ") . "개당") . " " . $shopInfo[self::SELL_PRICE] . "$") : 
+										$shopInfo[self::ITEM_ID] . "\n" . Color::AQUA . ($shopInfo[self::BUY_AMOUNT] == "-" ? "" : (is_numeric($shopInfo[self::BUY_AMOUNT]) ? $shopInfo[self::BUY_AMOUNT] . " => " : ($shopInfo[self::BUY_AMOUNT] == "?" ? "" : $shopInfo[self::BUY_AMOUNT] . " => ") . "Unit") . " " . $shopInfo[self::BUY_PRICE] . "$") . ($shopInfo[self::SELL_AMOUNT] == "-" ? "" :  "\n" . Color::DARK_AQUA . (is_numeric($shopInfo[self::SELL_AMOUNT]) ? $shopInfo[self::SELL_AMOUNT] . " => " : ($shopInfo[self::SELL_AMOUNT] == "?" ? "" : $shopInfo[self::SELL_AMOUNT] . " => ") . "Unit") . " " . $shopInfo[self::SELL_PRICE] . "$")
+									)
+								];
+								$this->packets[$posKey][self::PACKET_ADD_ENTITY] = clone $this->addEntityPk;
+							}
+							if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK])){
+								$this->setEntityLinkPk->from = $this->eids[$posKey] + 1;
+								$this->setEntityLinkPk->to = $this->eids[$posKey];
+								$this->packets[$posKey][self::PACKET_SET_ENTITY_LINK] = clone $this->setEntityLinkPk;
+							}
+							$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY]);
+							$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ENTITY]);
+							$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK]);
+							$this->spawned[$posKey][$name] = [$player, false, self::INFO_TIME => time(true)];
+						}elseif(isset($this->spawned[$posKey][$name][self::INFO_TIME]) && isset($this->spawned[$posKey][$name][self::INFO_TIME]) && time(true) - $this->spawned[$posKey][$name][self::INFO_TIME] > 60){
+							if(!isset($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST])){
+								$this->removeEntityPk->eid = $this->eids[$posKey];
+								$this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST] = clone $this->removeEntityPk;
+							}
+							if(!isset($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND])){
+								$this->removeEntityPk->eid = $this->eids[$posKey] + 1;
+								$this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND] = clone $this->removeEntityPk;
+							}
+		 					$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST]);
+		 					$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND]);
+							$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY]);
+							$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ENTITY]);
+							$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK]);
+							$this->spawned[$posKey][$name][self::INFO_TIME] = time(true);
 						}
-						if(!isset($this->packets[$posKey][self::PACKET_ADD_ENTITY])){
-							$this->addEntityPk->eid = $this->eids[$posKey] + 1;
-							$this->addEntityPk->x = $pos[0] + 0.5;
-							$this->addEntityPk->y = $pos[1];
-							$this->addEntityPk->z = $pos[2] + 0.5;
-							$this->addEntityPk->metadata[Entity::DATA_NAMETAG] = [
-								Entity::DATA_TYPE_STRING, Color::GREEN . ($this->isKorean() ?
-									$shopInfo[self::ITEM_ID] . "\n" . Color::AQUA . ($shopInfo[self::BUY_AMOUNT] == "-" ? "" : (is_numeric($shopInfo[self::BUY_AMOUNT]) ? $shopInfo[self::BUY_AMOUNT] . " => " : ($shopInfo[self::BUY_AMOUNT] == "?" ? "" : $shopInfo[self::BUY_AMOUNT] . " => ") . "개당") . " " . $shopInfo[self::BUY_PRICE] . "$") . ($shopInfo[self::SELL_AMOUNT] == "-" ? "" : "\n" . Color::DARK_AQUA . (is_numeric($shopInfo[self::SELL_AMOUNT]) ? $shopInfo[self::SELL_AMOUNT] . " => " : ($shopInfo[self::SELL_AMOUNT] == "?" ? "" : $shopInfo[self::SELL_AMOUNT] . " => ") . "개당") . " " . $shopInfo[self::SELL_PRICE] . "$") : 
-									$shopInfo[self::ITEM_ID] . "\n" . Color::AQUA . ($shopInfo[self::BUY_AMOUNT] == "-" ? "" : (is_numeric($shopInfo[self::BUY_AMOUNT]) ? $shopInfo[self::BUY_AMOUNT] . " => " : ($shopInfo[self::BUY_AMOUNT] == "?" ? "" : $shopInfo[self::BUY_AMOUNT] . " => ") . "Unit") . " " . $shopInfo[self::BUY_PRICE] . "$") . ($shopInfo[self::SELL_AMOUNT] == "-" ? "" :  "\n" . Color::DARK_AQUA . (is_numeric($shopInfo[self::SELL_AMOUNT]) ? $shopInfo[self::SELL_AMOUNT] . " => " : ($shopInfo[self::SELL_AMOUNT] == "?" ? "" : $shopInfo[self::SELL_AMOUNT] . " => ") . "Unit") . " " . $shopInfo[self::SELL_PRICE] . "$")
-								)
-							];
-							$this->packets[$posKey][self::PACKET_ADD_ENTITY] = clone $this->addEntityPk;
-						}
-						if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK])){
-							$this->setEntityLinkPk->from = $this->eids[$posKey] + 1;
-							$this->setEntityLinkPk->to = $this->eids[$posKey];
-							$this->packets[$posKey][self::PACKET_SET_ENTITY_LINK] = clone $this->setEntityLinkPk;
-						}
-						$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY]);
-						$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ENTITY]);
-						$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK]);
-						$this->spawned[$posKey][$name] = [$player, false, self::INFO_TIME => time(true)];
-					}elseif(isset($this->spawned[$posKey][$name][self::INFO_TIME]) && isset($this->spawned[$posKey][$name][self::INFO_TIME]) && time(true) - $this->spawned[$posKey][$name][self::INFO_TIME] > 60){
+					}elseif(isset($this->spawned[$posKey][$name = $player->getName()])){
 						if(!isset($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST])){
 							$this->removeEntityPk->eid = $this->eids[$posKey];
 							$this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST] = clone $this->removeEntityPk;
@@ -565,47 +594,32 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 						}
 	 					$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST]);
 	 					$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND]);
-						$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY]);
-						$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ENTITY]);
-						$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK]);
-						$this->spawned[$posKey][$name][self::INFO_TIME] = time(true);
-					}
-				}elseif(isset($this->spawned[$posKey][$name = $player->getName()])){
-					if(!isset($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST])){
-						$this->removeEntityPk->eid = $this->eids[$posKey];
-						$this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST] = clone $this->removeEntityPk;
-					}
-					if(!isset($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND])){
-						$this->removeEntityPk->eid = $this->eids[$posKey] + 1;
-						$this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND] = clone $this->removeEntityPk;
-					}
- 					$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST]);
- 					$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND]);
-					unset($this->spawned[$posKey][$name]);
-  				}
-  				if(isset($this->spawned[$posKey][$name]) && ($shopInfo[self::BUY_AMOUNT] != "-" || $shopInfo[self::SELL_AMOUNT] != "-")){
-  					if($distance < 3){
-  						if($this->spawned[$posKey][$name][1] === false){
-							if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW])){
-								$this->setEntityDataPk->eid = $this->eids[$posKey] + 1;
-								$this->setEntityDataPk->metadata = [Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, true]];
-								$this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW] = clone $this->setEntityDataPk;
-							}
-		 					$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW]);
-		 					$this->spawned[$posKey][$name][1] = true;
-		 				}
-  					}else{
-  						if($this->spawned[$posKey][$name][1] === true){
-							if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE])){
-								$this->setEntityDataPk->eid = $this->eids[$posKey] + 1;
-								$this->setEntityDataPk->metadata = [Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, false]];
-								$this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE] = clone $this->setEntityDataPk;
-							}
-		 					$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE]);
-		 					$this->spawned[$posKey][$name][1] = false;
-		 				}
-		 			}
-  				}
+						unset($this->spawned[$posKey][$name]);
+	  				}
+	  				if(isset($this->spawned[$posKey][$name]) && ($shopInfo[self::BUY_AMOUNT] != "-" || $shopInfo[self::SELL_AMOUNT] != "-")){
+	  					if($distance < 3){
+	  						if($this->spawned[$posKey][$name][1] === false){
+								if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW])){
+									$this->setEntityDataPk->eid = $this->eids[$posKey] + 1;
+									$this->setEntityDataPk->metadata = [Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, true]];
+									$this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW] = clone $this->setEntityDataPk;
+								}
+			 					$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW]);
+			 					$this->spawned[$posKey][$name][1] = true;
+			 				}
+	  					}else{
+	  						if($this->spawned[$posKey][$name][1] === true){
+								if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE])){
+									$this->setEntityDataPk->eid = $this->eids[$posKey] + 1;
+									$this->setEntityDataPk->metadata = [Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, false]];
+									$this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE] = clone $this->setEntityDataPk;
+								}
+			 					$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE]);
+			 					$this->spawned[$posKey][$name][1] = false;
+			 				}
+			 			}
+	  				}
+				}
 			}
 		}
 	}
@@ -614,7 +628,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 		if(!isset($this->data[$pos])){
 			$this->data[$pos] = $info;
 			$pos = explode(":", $pos);
-			if(($level = $this->getServer()->getLevelByName($pos[3])) != false) $level->setBlock(new \pocketmine\math\Vector3($pos[0], $pos[1], $pos[2]), \pocketmine\block\Block::get(20));
+			if(($level = $this->getServer()->getLevelByName($pos[3])) != false) $level->setBlock(new Vector3($pos[0], $pos[1], $pos[2]), Block::get(20));
 		}
 	}
 
@@ -640,20 +654,23 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 		return floor($pos->x) . ":" . floor($pos->y) . ":" . floor($pos->z) . ":" . $pos->getLevel()->getFolderName();
 	}
 
-	public function getMoney(Player $player){
+	public function getMoney($player){
 		if(!$this->money){
 			return false;
 		}else{
+			if($player instanceof Player){
+				$player = $player->getName();
+			}elseif(!is_string($player)){
+				return false;
+			}
 			switch($this->money->getName()){
 				case "PocketMoney":
 				case "MassiveEconomy":
+				case "Money":
 					return $this->money->getMoney($player);
 				break;
 				case "EconomyAPI":
 					return $this->money->mymoney($player);
-				break;
-				case "Money":
-					return $this->money->getMoney($player->getName());
 				break;
 				default:
 					return false;
@@ -662,10 +679,15 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 		}
 	}
 
-	public function giveMoney(Player $player, $money){
+	public function giveMoney($player, $money){
 		if(!$this->money){
 			return false;
 		}else{
+			if($player instanceof Player){
+				$player = $player->getName();
+			}elseif(!is_string($player) || !is_numeric($money) || ($money = floor($money)) <= 0){
+				return false;
+			}
 			switch($this->money->getName()){
 				case "PocketMoney":
 					$this->money->grantMoney($player, $money);
@@ -674,10 +696,8 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 					$this->money->setMoney($player, $this->money->mymoney($player) + $money);
 				break;
 				case "MassiveEconomy":
-					$this->money->setMoney($player, $this->money->getMoney($player) + $money);
-				break;
 				case "Money":
-					$this->money->setMoney($name = $player->getName(), $this->money->getMoney($name) + $money);
+					$this->money->setMoney($player, $this->money->getMoney($player) + $money);
 				break;
 				default:
 					return false;
