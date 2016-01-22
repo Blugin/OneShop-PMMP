@@ -2,13 +2,32 @@
 
 namespace OneShop;
 
-use pocketmine\Player;
+use pocketmine\plugin\PluginBase;
+use pocketmine\event\Listener;
+use pocketmine\event\TranslationContainer as Translation;
+use pocketmine\event\block\BlockBreakEvent;
+use pocketmine\event\block\BlockPlaceEvent;
+use pocketmine\event\player\PlayerInteractEvent;
+use pocketmine\event\server\ServerCommandEvent;
+use pocketmine\event\server\RemoteServerCommandEvent;
+use pocketmine\event\player\PlayerCommandPreprocessEvent;
+use pocketmine\network\protocol\AddItemEntityPacket;
+use pocketmine\network\protocol\AddEntityPacket;
+use pocketmine\network\protocol\RemoveEntityPacket;
+use pocketmine\network\protocol\SetEntityLinkPacket;
+use pocketmine\network\protocol\SetEntityDataPacket;
+use pocketmine\command\CommandSender;
+use pocketmine\command\Command;
+use pocketmine\level\sound\ClickSound;
+use pocketmine\utils\TextFormat as Color;
 use pocketmine\entity\Entity;
 use pocketmine\item\Item;
-use pocketmine\utils\TextFormat as Color;
-use pocketmine\event\TranslationContainer as Translation;
+use pocketmine\block\Block;
+use pocketmine\math\Vector3;
+use pocketmine\Player;
+use OneShop\task\SpawnShopTask;
 
-class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event\Listener{
+class OneShop extends PluginBase implements Listener{
 	const TOUCH_MODE = 0;
 	const TOUCH_POS = 1;
 	const INFO_TIME = 2;
@@ -35,18 +54,18 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 	const REGEX_ID = "/([\?]|[a-zA-Z_]+|[0-9]+)[\:]([\?]|[0-9]+)|([\?]|[a-zA-Z_]+|[0-9]+)/";
 	const REGEX_AMOUNT = "/([\?])|([1-9][0-9]*)[\~|\-|\:]([0-9][0-9]*)|([0-9]+)|([\-])/";
 
- 	protected $data = [], $spawned = [], $eids = [], $editTouch = [], $shopTouch = [], $placed = [], $packets = [];
-	protected $addItemEntityPk, $addEntityPk, $removeEntityPk, $setEntityLinkPk, $setEntityDataPk;
+ 	private $data = [], $spawned = [], $eids = [], $editTouch = [], $shopTouch = [], $placed = [], $packets = [];
+	private $addItemEntityPk, $addEntityPk, $removeEntityPk, $setEntityLinkPk, $setEntityDataPk;
 
 	public function onLoad(){
-		$this->addItemEntityPk = new \pocketmine\network\protocol\AddItemEntityPacket();
+		$this->addItemEntityPk = new AddItemEntityPacket();
 		$this->addItemEntityPk->x = 0;
 		$this->addItemEntityPk->y = 0;
 		$this->addItemEntityPk->z = 0;
 		$this->addItemEntityPk->speedX = 0;
 		$this->addItemEntityPk->speedY = 0;
 		$this->addItemEntityPk->speedZ = 0;
-		$this->addEntityPk = new \pocketmine\network\protocol\AddEntityPacket();
+		$this->addEntityPk = new AddEntityPacket();
 		$this->addEntityPk->type = 69;
 		$this->addEntityPk->speedX = 0;
 		$this->addEntityPk->speedY = 0;
@@ -54,15 +73,13 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 		$this->addEntityPk->yaw = 0;
 		$this->addEntityPk->pitch = 0;
 		$this->addEntityPk->metadata = [
-			Entity::DATA_FLAGS => [Entity::DATA_TYPE_BYTE, true << Entity::DATA_FLAG_SNEAKING],
-			Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, false],
- 			Entity::DATA_SILENT => [Entity::DATA_TYPE_BYTE, true],
+			Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, false], 			Entity::DATA_SILENT => [Entity::DATA_TYPE_BYTE, true],
 			Entity::DATA_NO_AI => [Entity::DATA_TYPE_BYTE, true]
 		];
-		$this->removeEntityPk = new \pocketmine\network\protocol\RemoveEntityPacket();
-		$this->setEntityLinkPk = new \pocketmine\network\protocol\SetEntityLinkPacket();
+		$this->removeEntityPk = new RemoveEntityPacket();
+		$this->setEntityLinkPk = new SetEntityLinkPacket();
 		$this->setEntityLinkPk->type = 1;
-		$this->setEntityDataPk = new \pocketmine\network\protocol\SetEntityDataPacket();
+		$this->setEntityDataPk = new SetEntityDataPacket();
  	}
 
 	public function onEnable(){
@@ -76,9 +93,10 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 			$this->setEnabled(false);
 		}else{
 			$this->getLogger()->info(Color::GREEN . "[OneShop] " . ($this->isKorean() ? "경제 플러그인을 찾았습니다. : " : "Finded economy plugin : ") . $this->money->getName());
+			$this->getLogger()->info(Color::GREEN . "[OneShop] " . ($this->isKorean() ? "농장 플러그인을 찾았습니다. : " : "Finded farm plugin "));
 			$this->loadData();
 			$pluginManager->registerEvents($this, $this);
-			$this->getServer()->getScheduler()->scheduleRepeatingTask(new Task($this, [$this, "onTick"]), 10);
+			$this->getServer()->getScheduler()->scheduleRepeatingTask(new SpawnShopTask($this), 5);
 		}
 	}
 
@@ -86,7 +104,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 		$this->saveData();
 	}
 
-	public function onCommand(\pocketmine\command\CommandSender $sender, \pocketmine\command\Command $cmd, $label, array $sub){
+	public function onCommand(CommandSender $sender, Command $cmd, $label, array $sub){
 		$ik = $this->isKorean();
 		if(!isset($sub[0]) || $sub[0] == ""){
 			if(isset($this->editTouch[$name = $sender->getName()])){
@@ -107,7 +125,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 					unset($this->editTouch[$name]);
 					$r = Color::YELLOW . "[OneShop] " . ($ik ? "상점 추가모드가 해제됩니다." : "Shop add mode is disabled");
 				}elseif(!isset($sub[6]) || $sub[1] == "" || $sub[2] == "" || $sub[3] == "" || $sub[4] == "" || $sub[5] == "" || $sub[6] == ""){
-					$r = Color::RED .  "Usage: /OneShop Add(A) " . ($ik ? "<아이템ID> <구매갯수> <구매가격> <판매갯수> <판매가격>" : "<ItemID> <BuyAmount> <BuyPrice> <SellAmount> <SellPrice>") . " [X] [Y] [Z] [World]";
+					$r = Color::RED .  "Usage: /OneShop Add(A) " . ($ik ? "<아이템ID> <구매갯수> <구매가격> <판매갯수> <판매가격> <농장레벨>" : "<ItemID> <BuyAmount> <BuyPrice> <SellAmount> <SellPrice> <FarmLevel>") . " [X] [Y] [Z] [World]";
 				}else{
 					if(!preg_match(self::REGEX_ID, $sub[1], $idMatch)){
 						$r = Color::RED . "[OneShop] $sub[1]" . ($ik ? "은(는) 잘못된 아이템ID입니다." : " is invalid item id");
@@ -140,29 +158,29 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 							$r = Color::RED . "[OneShop] $sub[1]" . ($ik ? "은(는) 잘못된 아이템ID입니다." : " is invalid item id");
 						}else{
 							$id = $item->getID() . ":" . (!empty($idMatch[2]) ? ($idMatch[2] == "?" ? "?" : $item->getDamage()) : $item->getDamage());
-							if(!($isPlayer = $sender instanceof Player) || $isPlayer && isset($sub[8]) && $sub[6] != "" | $sub[7] != "" | $sub[8] != ""){
-								if(!isset($sub[8]) || $sub[6] == "" | $sub[7] == "" | $sub[8] == ""){
-									$r = Color::RED .  "Usage: /OneShop Add(A) " . ($ik ? "<아이템ID> <판매갯수> <판매가격> <구매갯수> <구매가격>" : "<ItemID> <BuyAmount> <BuyPrice> <SellAmount> <SellPrice>") . " [X] [Y] [Z] [World]";
-								}elseif(!is_numeric($sub[6])){
-									$r = Color::RED . "[OneShop] $sub[6]" . ($ik ? "은(는) 잘못된 X좌표입니다." : " is invalid X coordinate");
-								}elseif(!is_numeric($sub[7]) || ($sub[7] = floor($sub[7])) < 0 || ($sub[7] = floor($sub[7])) > 127){
-									$r = Color::RED . "[OneShop] $sub[7]" . ($ik ? "은(는) 잘못된 Y좌표입니다." : " is invalid Y coordinate");
-								}elseif(!is_numeric($sub[8])){
-									$r = Color::RED . "[OneShop] $sub[8]" . ($ik ? "은(는) 잘못된 Z좌표입니다." : " is invalid Z coordinate");
+							if(!($isPlayer = $sender instanceof Player) || $isPlayer && isset($sub[9]) && $sub[7] != "" | $sub[8] != "" | $sub[9] != ""){
+								if(!isset($sub[9]) || $sub[7] == "" | $sub[8] == "" | $sub[9] == ""){
+									$r = Color::RED .  "Usage: /OneShop Add(A) " . ($ik ? "<아이템ID> <판매갯수> <판매가격> <구매갯수> <구매가격> <농장레벨>" : "<ItemID> <BuyAmount> <BuyPrice> <SellAmount> <SellPrice> <FarmLevel>") . " [X] [Y] [Z] [World]";
+								}elseif(!is_numeric($sub[7])){
+									$r = Color::RED . "[OneShop] $sub[7]" . ($ik ? "은(는) 잘못된 X좌표입니다." : " is invalid X coordinate");
+								}elseif(!is_numeric($sub[8]) || ($sub[8] = floor($sub[8])) < 0 || ($sub[8] = floor($sub[8])) > 127){
+									$r = Color::RED . "[OneShop] $sub[8]" . ($ik ? "은(는) 잘못된 Y좌표입니다." : " is invalid Y coordinate");
+								}elseif(!is_numeric($sub[9])){
+									$r = Color::RED . "[OneShop] $sub[9]" . ($ik ? "은(는) 잘못된 Z좌표입니다." : " is invalid Z coordinate");
 								}else{
-									if(isset($sub[9]) && ($level = $this->getServer()->getLevelByName($sub[9])) === null){
-										$r = Color::RED . "[OneShop] $sub[9]" . ($ik ? "은(는) 잘못된 월드명입니다." : " is invalid world name");
-									}elseif(!isset($sub[9])){
+									if(isset($sub[10]) && ($level = $this->getServer()->getLevelByName($sub[10])) === null){
+										$r = Color::RED . "[OneShop] $sub[10]" . ($ik ? "은(는) 잘못된 월드명입니다." : " is invalid world name");
+									}elseif(!isset($sub[10])){
 										$level = $isPlayer ? $sender->getLevel() : $this->getServer()->getDefaultLevel();
 									}
 									if(!isset($r)){
-										if(!$level->isChunkLoaded($chunkX = ($sub[6] = floor($sub[6])) >> 4, $chunkZ = ($sub[8] = floor($sub[8])) >> 4) || !$level->isChunkGenerated($chunkX, $chunkZ)){
-											$r = Color::RED . "[OneShop] $sub[6],$sub[7],$sub[8]" . ($ik ? "은(는) 잘못된 좌표입니다." : " is invalid coordinate");
+										if(!$level->isChunkLoaded($chunkX = ($sub[7] = floor($sub[7])) >> 4, $chunkZ = ($sub[9] = floor($sub[9])) >> 4) || !$level->isChunkGenerated($chunkX, $chunkZ)){
+											$r = Color::RED . "[OneShop] $sub[7],$sub[8],$sub[9]" . ($ik ? "은(는) 잘못된 좌표입니다." : " is invalid coordinate");
 										}else{
-											if(isset($this->data[$pos = "$sub[6]:$sub[7]:$sub[8]:" . $level->getFolderName()])){
+											if(isset($this->data[$pos = "$sub[7]:$sub[8]:$sub[9]:" . $level->getFolderName()])){
 												$r = Color::RED . "[OneShop] " . ($ik ? "그곳에는 이미 상점이 있습니다." : "Shop is already exist in there");
 											}else{
-												$this->addShop($pos, $mode, $id, $sub[2], $sub[3], $sub[4], $sub[5]);
+												$this->addShop($pos, $mode, $id, $sub[2], $sub[3], $sub[4], $sub[5], $sub[6]);
 												$r = Color::YELLOW . "[OneShop] " . ($ik ? "상점을 추가했습니다.\n" . Color::GOLD . "  [OneShop][$pos] 아이디: " . $this->data[$pos][self::ITEM_ID] . ", 구매갯수: "  . (is_numeric($this->data[$pos][self::BUY_AMOUNT]) ? $this->data[$pos][self::BUY_AMOUNT] . ", " : ($this->data[$pos][self::BUY_AMOUNT] == "?" ? "모두, " : $this->data[$pos][self::BUY_AMOUNT]) . ", 개당") . " 가격: " . $this->data[$pos][self::BUY_PRICE] . "$, 판매갯수: "  . (is_numeric($this->data[$pos][self::SELL_AMOUNT]) ? $this->data[$pos][self::SELL_AMOUNT] . ", " : ($this->data[$pos][self::SELL_AMOUNT] == "?" ? "모두, " : $this->data[$pos][self::SELL_AMOUNT]) . ", 개당") . " 가격: " . $this->data[$pos][self::SELL_PRICE] . "$" : "Added the shop.\n" . Color::GOLD . "  [OneShop][$pos] ID: " . $this->data[$pos][self::ITEM_ID] . ", Buy Amount: "  . (is_numeric($this->data[$pos][self::BUY_AMOUNT]) ? $this->data[$pos][self::BUY_AMOUNT] . ", " : ($this->data[$pos][self::BUY_AMOUNT] == "?" ? "All, " : $this->data[$pos][self::BUY_AMOUNT]) . ", Unit") . " Price: " . $this->data[$pos][self::BUY_PRICE] . "$, Sell Amount: "  . (is_numeric($this->data[$pos][self::SELL_AMOUNT]) ? $this->data[$pos][self::SELL_AMOUNT] . ", " : ($this->data[$pos][self::SELL_AMOUNT] == "?" ? "All, " : $this->data[$pos][self::SELL_AMOUNT]) . ", Unit") . " Price: " . $this->data[$pos][self::SELL_PRICE] . "$");
 											}
 										}
@@ -285,13 +303,13 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 		return true;
 	}
 
-	public function onBlockBreak(\pocketmine\event\block\BlockBreakEvent $event){
+	public function onBlockBreak(BlockBreakEvent $event){
 		if((!isset($this->editTouch[$name = $event->getPlayer()->getName()]) || $this->editTouch[$name][self::TOUCH_MODE] !== self::MODE_BUILD) && isset($this->data[$this->pos2str($event->getBlock())])){
 			$event->setCancelled();
  		}
 	}
 
-	public function onBlockPlace(\pocketmine\event\block\BlockPlaceEvent $event){
+	public function onBlockPlace(BlockPlaceEvent $event){
 		if((!isset($this->editTouch[$name = $event->getPlayer()->getName()]) || $this->editTouch[$name][self::TOUCH_MODE] !== self::MODE_BUILD) && isset($this->data[$this->pos2str($event->getBlock())]) || isset($this->placed[$name])){
 			$event->setCancelled();
 			if(isset($this->placed[$name])){
@@ -300,7 +318,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
  		}
 	}
 
-	public function onPlayerInteract(\pocketmine\event\player\PlayerInteractEvent $event){
+	public function onPlayerInteract(PlayerInteractEvent $event){
 		$player = $event->getPlayer();
  		if((!isset($this->editTouch[$name = $player->getName()]) || $this->editTouch[$name][self::TOUCH_MODE] !== self::MODE_BUILD) && $event->getAction() == 1){ //$event->getAction() == PlayerInteractEvent::RIGHT_CLICK_BLOCK (== 1)
 			$block = $event->getBlock();
@@ -486,7 +504,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 	/**
 	 * @priority HIGHEST
 	 */
-	public function onServerCommandProcess(\pocketmine\event\server\ServerCommandEvent $event){
+	public function onServerCommandProcess(ServerCommandEvent $event){
 		if(!$event->isCancelled() && stripos("save-all", $command = $event->getCommand()) === 0){
 			$this->checkSaveAll($event->getSender());
 		}
@@ -495,7 +513,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 	/**
 	 * @priority HIGHEST
 	 */
-	public function onRemoteServerCommand(\pocketmine\event\server\RemoteServerCommandEvent $event){
+	public function onRemoteServerCommand(RemoteServerCommandEvent $event){
 		if(!$event->isCancelled() && stripos("save-all", $command = $event->getCommand()) === 0){
 			$this->checkSaveAll($event->getSender());
 		}
@@ -504,21 +522,21 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 	/**
 	 * @priority HIGHEST
 	 */
-	public function onPlayerCommandPreprocess(\pocketmine\event\player\PlayerCommandPreprocessEvent $event){
+	public function onPlayerCommandPreprocess(PlayerCommandPreprocessEvent $event){
 		if(!$event->isCancelled() && stripos("/save-all", $command = $event->getMessage()) === 0){
 			$this->checkSaveAll($event->getPlayer());
 		}
 	}
 
-	public function checkSaveAll(\pocketmine\command\CommandSender $sender){
-		if(($command =  $this->getServer()->getCommandMap()->getCommand("save-all")) instanceof \pocketmine\command\Command && $command->testPermissionSilent($sender)){
+	public function checkSaveAll(CommandSender $sender){
+		if(($command =  $this->getServer()->getCommandMap()->getCommand("save-all")) instanceof Command && $command->testPermissionSilent($sender)){
 			$this->saveData();
 			$sender->sendMessage(Color::YELLOW . "[OneShop] Saved data.");
 		}
 	}
 
- 	public function onTick(){
-		foreach($this->data as $posKey => $shopInfo){
+ 	public function onAsyncRun(){
+ 		foreach($this->data as $posKey => $shopInfo){
 			if(!isset($this->spawned[$posKey])){
 				$this->spawned[$posKey] = [];
 			}
@@ -622,7 +640,7 @@ class OneShop extends \pocketmine\plugin\PluginBase implements \pocketmine\event
 		if(!isset($this->data[$pos])){
 			$this->data[$pos] = $info;
 			$pos = explode(":", $pos);
-			if(($level = $this->getServer()->getLevelByName($pos[3])) != false) $level->setBlock(new \pocketmine\math\Vector3($pos[0], $pos[1], $pos[2]), \pocketmine\block\Block::get(20));
+			if(($level = $this->getServer()->getLevelByName($pos[3])) != false) $level->setBlock(new Vector3($pos[0], $pos[1], $pos[2]), Block::get(20));
 		}
 	}
 
