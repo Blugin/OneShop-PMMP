@@ -548,54 +548,37 @@ class OneShop extends PluginBase implements Listener{
 				$this->packets[$posKey] = [];
 			}
 			$pos = explode(":", $posKey);
-			if(($level = $this->getServer()->getLevelByName($pos[3])) !== null){
-				foreach($level->getPlayers() as $player){
-					if($player->spawned && ($distance = sqrt(pow($dX = ($x = $pos[0]) - $player->x, 2) + pow(($y = $pos[1]) - $player->y, 2) + pow($dZ = ($z = $pos[2]) - $player->z, 2))) < 200){
-						if(!isset($this->spawned[$posKey][$name = $player->getName()])){
-		 					if(!isset($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY])){
-			 					$this->addItemEntityPk->eid = $this->eids[$posKey];
-								$this->addItemEntityPk->item = new item(...explode(":", $shopInfo[self::ITEM_ID]));
-								$this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY] = clone $this->addItemEntityPk;
-							}
-							if(!isset($this->packets[$posKey][self::PACKET_ADD_ENTITY])){
-								$this->addEntityPk->eid = $this->eids[$posKey] + 1;
-								$this->addEntityPk->x = $pos[0] + 0.5;
-								$this->addEntityPk->y = $pos[1];
-								$this->addEntityPk->z = $pos[2] + 0.5;
-								$this->addEntityPk->metadata[Entity::DATA_NAMETAG] = [
-									Entity::DATA_TYPE_STRING, Color::GREEN . ($this->isKorean() ?
-										"Lv." . $shopInfo[self::LEVEL] . "  " . $shopInfo[self::ITEM_ID] . "\n" . Color::AQUA . ($shopInfo[self::BUY_AMOUNT] == "-" ? "" : (is_numeric($shopInfo[self::BUY_AMOUNT]) ? $shopInfo[self::BUY_AMOUNT] . " => " : ($shopInfo[self::BUY_AMOUNT] == "?" ? "" : $shopInfo[self::BUY_AMOUNT] . " => ") . "개당") . " " . $shopInfo[self::BUY_PRICE] . "$") . ($shopInfo[self::SELL_AMOUNT] == "-" ? "" : "\n" . Color::DARK_AQUA . (is_numeric($shopInfo[self::SELL_AMOUNT]) ? $shopInfo[self::SELL_AMOUNT] . " => " : ($shopInfo[self::SELL_AMOUNT] == "?" ? "" : $shopInfo[self::SELL_AMOUNT] . " => ") . "개당") . " " . $shopInfo[self::SELL_PRICE] . "$") : 
-										"Lv." . $shopInfo[self::LEVEL] . "  " . $shopInfo[self::ITEM_ID] . "\n" . Color::AQUA . ($shopInfo[self::BUY_AMOUNT] == "-" ? "" : (is_numeric($shopInfo[self::BUY_AMOUNT]) ? $shopInfo[self::BUY_AMOUNT] . " => " : ($shopInfo[self::BUY_AMOUNT] == "?" ? "" : $shopInfo[self::BUY_AMOUNT] . " => ") . "Unit") . " " . $shopInfo[self::BUY_PRICE] . "$") . ($shopInfo[self::SELL_AMOUNT] == "-" ? "" :  "\n" . Color::DARK_AQUA . (is_numeric($shopInfo[self::SELL_AMOUNT]) ? $shopInfo[self::SELL_AMOUNT] . " => " : ($shopInfo[self::SELL_AMOUNT] == "?" ? "" : $shopInfo[self::SELL_AMOUNT] . " => ") . "Unit") . " " . $shopInfo[self::SELL_PRICE] . "$")
-									)
-								];
-								$this->packets[$posKey][self::PACKET_ADD_ENTITY] = clone $this->addEntityPk;
-							}
-							if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK])){
-								$this->setEntityLinkPk->from = $this->eids[$posKey] + 1;
-								$this->setEntityLinkPk->to = $this->eids[$posKey];
-								$this->packets[$posKey][self::PACKET_SET_ENTITY_LINK] = clone $this->setEntityLinkPk;
-							}
-							$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY]);
-							$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ENTITY]);
-							$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK]);
-							$this->spawned[$posKey][$name] = [$player, false, self::INFO_TIME => time(true)];
-						}elseif(isset($this->spawned[$posKey][$name][self::INFO_TIME]) && isset($this->spawned[$posKey][$name][self::INFO_TIME]) && time(true) - $this->spawned[$posKey][$name][self::INFO_TIME] > 60){
-							if(!isset($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST])){
-								$this->removeEntityPk->eid = $this->eids[$posKey];
-								$this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST] = clone $this->removeEntityPk;
-							}
-							if(!isset($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND])){
-								$this->removeEntityPk->eid = $this->eids[$posKey] + 1;
-								$this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND] = clone $this->removeEntityPk;
-							}
-		 					$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST]);
-		 					$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND]);
-							$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY]);
-							$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ENTITY]);
-							$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK]);
-							$this->spawned[$posKey][$name][self::INFO_TIME] = time(true);
+			foreach($this->getServer()->getOnlinePlayers() as $player){
+				if($player->spawned && strtolower($player->getLevel()->getFolderName()) === $pos[3] && ($distance = sqrt(pow($dX = ($x = $pos[0]) - $player->x, 2) + pow(($y = $pos[1]) - $player->y, 2) + pow($dZ = ($z = $pos[2]) - $player->z, 2))) < 200){
+					if(!isset($this->spawned[$posKey][$name = $player->getName()])){
+		 				if(!isset($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY])){
+			 				$this->addItemEntityPk->eid = $this->eids[$posKey];
+							$this->addItemEntityPk->item = new item(...explode(":", $shopInfo[self::ITEM_ID]));
+							$this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY] = clone $this->addItemEntityPk;
 						}
-					}elseif(isset($this->spawned[$posKey][$name = $player->getName()])){
+						if(!isset($this->packets[$posKey][self::PACKET_ADD_ENTITY])){
+							$this->addEntityPk->eid = $this->eids[$posKey] + 1;
+							$this->addEntityPk->x = $pos[0] + 0.5;
+							$this->addEntityPk->y = $pos[1];
+							$this->addEntityPk->z = $pos[2] + 0.5;
+							$this->addEntityPk->metadata[Entity::DATA_NAMETAG] = [
+								Entity::DATA_TYPE_STRING, Color::GREEN . ($this->isKorean() ?
+									"Lv." . $shopInfo[self::LEVEL] . "  " . $shopInfo[self::ITEM_ID] . "\n" . Color::AQUA . ($shopInfo[self::BUY_AMOUNT] == "-" ? "" : (is_numeric($shopInfo[self::BUY_AMOUNT]) ? $shopInfo[self::BUY_AMOUNT] . " => " : ($shopInfo[self::BUY_AMOUNT] == "?" ? "" : $shopInfo[self::BUY_AMOUNT] . " => ") . "개당") . " " . $shopInfo[self::BUY_PRICE] . "$") . ($shopInfo[self::SELL_AMOUNT] == "-" ? "" : "\n" . Color::DARK_AQUA . (is_numeric($shopInfo[self::SELL_AMOUNT]) ? $shopInfo[self::SELL_AMOUNT] . " => " : ($shopInfo[self::SELL_AMOUNT] == "?" ? "" : $shopInfo[self::SELL_AMOUNT] . " => ") . "개당") . " " . $shopInfo[self::SELL_PRICE] . "$") : 
+									"Lv." . $shopInfo[self::LEVEL] . "  " . $shopInfo[self::ITEM_ID] . "\n" . Color::AQUA . ($shopInfo[self::BUY_AMOUNT] == "-" ? "" : (is_numeric($shopInfo[self::BUY_AMOUNT]) ? $shopInfo[self::BUY_AMOUNT] . " => " : ($shopInfo[self::BUY_AMOUNT] == "?" ? "" : $shopInfo[self::BUY_AMOUNT] . " => ") . "Unit") . " " . $shopInfo[self::BUY_PRICE] . "$") . ($shopInfo[self::SELL_AMOUNT] == "-" ? "" :  "\n" . Color::DARK_AQUA . (is_numeric($shopInfo[self::SELL_AMOUNT]) ? $shopInfo[self::SELL_AMOUNT] . " => " : ($shopInfo[self::SELL_AMOUNT] == "?" ? "" : $shopInfo[self::SELL_AMOUNT] . " => ") . "Unit") . " " . $shopInfo[self::SELL_PRICE] . "$")
+							)
+							];
+							$this->packets[$posKey][self::PACKET_ADD_ENTITY] = clone $this->addEntityPk;
+						}
+						if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK])){
+							$this->setEntityLinkPk->from = $this->eids[$posKey] + 1;
+							$this->setEntityLinkPk->to = $this->eids[$posKey];
+							$this->packets[$posKey][self::PACKET_SET_ENTITY_LINK] = clone $this->setEntityLinkPk;
+						}
+						$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY]);
+						$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ENTITY]);
+						$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK]);
+						$this->spawned[$posKey][$name] = [$player, false, self::INFO_TIME => time(true)];
+					}elseif(isset($this->spawned[$posKey][$name][self::INFO_TIME]) && isset($this->spawned[$posKey][$name][self::INFO_TIME]) && time(true) - $this->spawned[$posKey][$name][self::INFO_TIME] > 60){
 						if(!isset($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST])){
 							$this->removeEntityPk->eid = $this->eids[$posKey];
 							$this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST] = clone $this->removeEntityPk;
@@ -604,31 +587,46 @@ class OneShop extends PluginBase implements Listener{
 							$this->removeEntityPk->eid = $this->eids[$posKey] + 1;
 							$this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND] = clone $this->removeEntityPk;
 						}
-	 					$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST]);
-	 					$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND]);
-						unset($this->spawned[$posKey][$name]);
-	  				}
-	  				if(isset($this->spawned[$posKey][$name]) && ($shopInfo[self::BUY_AMOUNT] != "-" || $shopInfo[self::SELL_AMOUNT] != "-")){
-	  					if($distance < 3){
-	  						if($this->spawned[$posKey][$name][1] === false){
-								if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW])){
-									$this->setEntityDataPk->eid = $this->eids[$posKey] + 1;
-									$this->setEntityDataPk->metadata = [Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, true]];
-									$this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW] = clone $this->setEntityDataPk;
-								}
-			 					$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW]);
-			 					$this->spawned[$posKey][$name][1] = true;
-			 				}
-	  					}else{
-	  						if($this->spawned[$posKey][$name][1] === true){
-								if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE])){
-									$this->setEntityDataPk->eid = $this->eids[$posKey] + 1;
-									$this->setEntityDataPk->metadata = [Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, false]];
-									$this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE] = clone $this->setEntityDataPk;
-								}
-			 					$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE]);
-			 					$this->spawned[$posKey][$name][1] = false;
-			 				}
+		 				$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST]);
+		 				$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND]);
+						$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ITEM_ENTITY]);
+						$player->dataPacket($this->packets[$posKey][self::PACKET_ADD_ENTITY]);
+						$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_LINK]);
+						$this->spawned[$posKey][$name][self::INFO_TIME] = time(true);
+					}
+				}elseif(isset($this->spawned[$posKey][$name = $player->getName()])){
+					if(!isset($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST])){
+						$this->removeEntityPk->eid = $this->eids[$posKey];
+						$this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST] = clone $this->removeEntityPk;
+					}
+					if(!isset($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND])){
+						$this->removeEntityPk->eid = $this->eids[$posKey] + 1;
+						$this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND] = clone $this->removeEntityPk;
+					}
+	 				$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_FIRST]);
+	 				$player->dataPacket($this->packets[$posKey][self::PACKET_REMOVE_ENTITY_SECOND]);
+					unset($this->spawned[$posKey][$name]);
+	  			}
+	  			if(isset($this->spawned[$posKey][$name]) && ($shopInfo[self::BUY_AMOUNT] != "-" || $shopInfo[self::SELL_AMOUNT] != "-")){
+	  				if($distance < 3){
+	  					if($this->spawned[$posKey][$name][1] === false){
+							if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW])){
+								$this->setEntityDataPk->eid = $this->eids[$posKey] + 1;
+								$this->setEntityDataPk->metadata = [Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, true]];
+								$this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW] = clone $this->setEntityDataPk;
+							}
+							$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_SHOW]);
+			 				$this->spawned[$posKey][$name][1] = true;
+			 			}
+	  				}else{
+	  					if($this->spawned[$posKey][$name][1] === true){
+							if(!isset($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE])){
+								$this->setEntityDataPk->eid = $this->eids[$posKey] + 1;
+								$this->setEntityDataPk->metadata = [Entity::DATA_SHOW_NAMETAG => [Entity::DATA_TYPE_BYTE, false]];
+								$this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE] = clone $this->setEntityDataPk;
+							}
+			 				$player->dataPacket($this->packets[$posKey][self::PACKET_SET_ENTITY_DATA_HIDE]);
+			 				$this->spawned[$posKey][$name][1] = false;
 			 			}
 	  				}
 				}
